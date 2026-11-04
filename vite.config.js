@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { cloudflare } from "@cloudflare/vite-plugin";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
+import { nitro } from "nitro/vite";
 import { defineConfig } from "vite";
 
 const NOT_PREBUNDLED = new Set(["react", "react-dom", "@tanstack/react-start", "@tanstack/react-router", "@tanstack/react-router-ssr-query", "tailwindcss-animate"]);
@@ -16,15 +16,9 @@ export default defineConfig({
     },
   },
   optimizeDeps: { include: PREBUNDLE },
-  environments: {
-    ssr: {
-      optimizeDeps: { include: PREBUNDLE },
-      build: { sourcemap: true, rolldownOptions: { output: { sourcemapExcludeSources: true } } },
-    },
-  },
   plugins: [
-    cloudflare({ viteEnvironment: { name: "ssr" }, inspectorPort: false }),
     tanstackStart({ srcDirectory: "src" }),
+    nitro(),
     react(),
   ],
 });
