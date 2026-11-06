@@ -342,17 +342,21 @@ export const callAstroApi = createServerFn({ method: "POST" })
 
   const endpoint = data.endpoint.startsWith("/") ? data.endpoint.slice(1) : data.endpoint;
   try {
-    const res = await fetch(`https://json.freeastrologyapi.com/v1/${endpoint}`, {
+    const res = await fetch(`https://json.freeastrologyapi.com/${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; VastugrahBot/1.0)",
         "x-api-key": apiKey,
       },
       body: JSON.stringify(data.payload || {}),
     });
 
     if (!res.ok) {
-      return { error: `FreeAstrologyAPI error: ${res.status}` };
+      const body = (await res.text().catch(() => "")).slice(0, 200);
+      console.error(`[AstroAPI] ${endpoint} -> HTTP ${res.status}: ${body}`);
+      return { error: `FreeAstrologyAPI error: ${res.status} ${body}`.trim() };
     }
 
     return await res.json();

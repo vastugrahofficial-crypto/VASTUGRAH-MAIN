@@ -1,4 +1,3 @@
-
 import {
   ayanamsa, ascendant, dms, julianDay, karanaName, nakshatraOf, norm360,
   PLANET_ABBR, PLANET_NAMES, PLANET_SK, SIGNS_EN, SIGNS_SK,
