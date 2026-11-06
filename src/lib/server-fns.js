@@ -2,6 +2,29 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 /* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+// Reads a secret from process.env (Node / Cloudflare nodejs_compat) or import.meta.env.
+// Vite only exposes VITE_-prefixed .env values through import.meta.env, so for local
+// development we also accept VITE_<NAME>. In production prefer the plain name as a host secret.
+function getEnv(name) {
+  try {
+    if (typeof process !== "undefined") {
+      if (process.env?.[name]) return process.env[name];
+      if (process.env?.[`VITE_${name}`]) return process.env[`VITE_${name}`];
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    return import.meta.env?.[name] || import.meta.env?.[`VITE_${name}`] || "";
+  } catch {
+    return "";
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Inquiries                                                           */
 /* ------------------------------------------------------------------ */
 
@@ -24,20 +47,20 @@ export const createInquiry = createServerFn({ method: "POST" })
   });
 
 /* ------------------------------------------------------------------ */
-/* AI astrologer chat (Gemini)                                         */
+/* AI Astrologer (Gemini)                                              */
 /* ------------------------------------------------------------------ */
 
 const specialistFocus = {
-  career: "career, job changes, promotions and workplace timing",
-  wealth: "long-term wealth, savings, property and dhana yogas",
-  money: "cash flow, debts, loans and monthly finances",
-  health: "constitution, energy cycles and periods needing care",
-  love: "romance, compatibility and reconciliation",
-  marriage: "marriage matching, timing and married life",
-  birth: "reading the kundli, lagna, nakshatra, dashas and yogas",
-  business: "partnerships, expansion, launch timing and business Vastu",
-  education: "studies, exams, foreign education and career streams",
-  vastu: "rooms, directions, entrances and non-demolition Vastu remedies",
+  career: "career, job changes, promotions, workplace harmony and professional timing",
+  wealth: "long-term wealth accumulation, savings, ancestral property and Dhana Yogas",
+  money: "liquid cash flow, debts, loan clearances and month-to-month finances",
+  health: "vitality, constitution, energetic cycles and periods requiring remedial care",
+  love: "romance, heart compatibility, relationship friction and reconciliation",
+  marriage: "horoscope matching, marriage timing, married life harmony and Manglik analysis",
+  birth: "comprehensive Janma Kundli reading, Lagna, Nakshatras, Mahadasha and Raja Yogas",
+  business: "partnerships, commercial expansion, venture launch Muhurat and business Vastu",
+  education: "studies, competitive examinations, foreign education prospects and stream selection",
+  vastu: "directional energy alignment, entrances, room placements and non-demolition remedies",
 };
 
 const AiChatInput = z.object({
@@ -53,130 +76,288 @@ const AiChatInput = z.object({
     "education",
     "vastu",
   ]),
-  chart: z.string().max(600).optional(),
-  name: z.string().max(80).optional(),
+  chart: z.string().max(3000).optional(),
+  name: z.string().max(120).optional(),
   lang: z.enum(["en", "hi"]).optional(),
   messages: z
-    .array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().min(1).max(1000) }))
+    .array(
+      z.object({
+        role: z.enum(["user", "assistant"]),
+        content: z.string().min(1).max(4000),
+      })
+    )
     .min(1)
-    .max(10),
+    .max(60),
 });
 
-const FALLBACK_REPLY = "Let me look at this again — could you rephrase your question in one line?";
+// Gemini 2.0 is retired and 2.5 is restricted to existing users, so use the Gemini 3.x models.
+// Google retires models often: check https://ai.google.dev/gemini-api/docs/models for current IDs.
+// Fastest first: Flash-Lite is built for low latency; the full Flash models are fallbacks.
+const GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.7-flash"];
+
+/**
+ * Calls Gemini with a system instruction and proper role history.
+ * Returns { text } on success or { error } with the reason (logged to the server console).
+ */
+async function callGemini({ system, messages, apiKey }) {
+  if (!apiKey) return { error: "GEMINI_API_KEY is not set on the server" };
+
+  // Gemini uses "model" (not "assistant"), history must start with "user",
+  // and consecutive same-role turns are merged.
+  const contents = [];
+  for (const m of messages) {
+    const role = m.role === "assistant" ? "model" : "user";
+    const last = contents[contents.length - 1];
+    if (last && last.role === role) {
+      last.parts[0].text += `\n${m.content}`;
+    } else {
+      contents.push({ role, parts: [{ text: m.content }] });
+    }
+  }
+  while (contents.length && contents[0].role !== "user") contents.shift();
+  if (!contents.length) return { error: "No user message to send" };
+
+  const errors = [];
+  const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Never hang: each request is aborted after 10s and Gemini gets ~14s in total, then the backup provider takes over.
+  const deadline = Date.now() + 14000;
+
+  for (const model of GEMINI_MODELS) {
+    let useThinkingCfg = true; // low reasoning effort = much faster answers
+    // Temporary overloads (503) are common on free keys: retry each model a few times.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (Date.now() > deadline) {
+        errors.push("Timed out after trying several times (Gemini is slow or overloaded)");
+        return { error: errors.join("\n") };
+      }
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          {
+            method: "POST",
+            signal: AbortSignal.timeout(10000),
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": apiKey,
+            },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: system }] },
+              contents,
+              generationConfig: {
+                // Gemini 3 models always "think" first and that counts toward this limit,
+                // so keep it generous to avoid cut-off or empty answers.
+                maxOutputTokens: 2048,
+                temperature: 0.75,
+                topP: 0.95,
+                ...(useThinkingCfg ? { thinkingConfig: { thinkingLevel: "low" } } : {}),
+              },
+            }),
+          }
+        );
+
+        if (!res.ok) {
+          const body = (await res.text()).slice(0, 300);
+          const msg = `${model} (try ${attempt}) -> HTTP ${res.status}: ${body}`;
+          errors.push(msg);
+          console.error("[Gemini]", msg);
+          // If this model rejects the thinking option, retry it once without that option.
+          if (res.status === 400 && useThinkingCfg && /think/i.test(body)) {
+            useThinkingCfg = false;
+            attempt -= 1;
+            continue;
+          }
+          if (RETRYABLE.has(res.status) && attempt < 2) {
+            await sleep(attempt * 1200);
+            continue; // retry same model
+          }
+          break; // non-retryable (404, 400, ...) or out of retries: next model
+        }
+
+        const json = await res.json();
+        const text = (json?.candidates?.[0]?.content?.parts || [])
+          .map((p) => p.text || "")
+          .join("")
+          .trim();
+
+        if (text) return { text };
+
+        const emptyMsg = `${model} -> empty response (finishReason: ${json?.candidates?.[0]?.finishReason || json?.promptFeedback?.blockReason || "unknown"})`;
+        errors.push(emptyMsg);
+        console.error("[Gemini]", emptyMsg);
+        break;
+      } catch (err) {
+        const netMsg = `${model} (try ${attempt}) -> network error/timeout: ${err?.message || err}`;
+        errors.push(netMsg);
+        console.error("[Gemini]", netMsg);
+        if (attempt < 2) {
+          await sleep(attempt * 1200);
+          continue;
+        }
+        break;
+      }
+    }
+  }
+
+  return { error: errors.join("\n") || "Unknown error" };
+}
+
+/**
+ * Backup provider: Groq (free tier, OpenAI-compatible). Used when Gemini is overloaded or fails.
+ * Returns { text } on success or { error } with the reason.
+ */
+// Groq retired the Llama 3.3 / 3.1 models for free keys on 2026-08-16; these are the replacements.
+// Check https://console.groq.com/docs/models if a model ID stops working.
+const GROQ_MODELS = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"];
+
+async function callGroq({ system, messages, apiKey }) {
+  if (!apiKey) return { error: "GROQ_API_KEY is not set on the server" };
+
+  const chat = messages.map((m) => ({ role: m.role, content: m.content }));
+  while (chat.length && chat[0].role !== "user") chat.shift();
+  if (!chat.length) return { error: "No user message to send" };
+
+  const errors = [];
+
+  for (const model of GROQ_MODELS) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        signal: AbortSignal.timeout(20000),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "system", content: system }, ...chat],
+          temperature: 0.75,
+          // reasoning models count their hidden thinking toward this limit
+          max_completion_tokens: 3000,
+          // low reasoning effort = faster answers (supported by the gpt-oss models)
+          ...(model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
+        }),
+      });
+
+      if (!res.ok) {
+        const body = (await res.text()).slice(0, 300);
+        const msg = `[groq] ${model} -> HTTP ${res.status}: ${body}`;
+        errors.push(msg);
+        console.error(msg);
+        continue;
+      }
+
+      const json = await res.json();
+      const text = (json?.choices?.[0]?.message?.content || "").trim();
+      if (text) return { text };
+
+      const emptyMsg = `[groq] ${model} -> empty response`;
+      errors.push(emptyMsg);
+      console.error(emptyMsg);
+    } catch (err) {
+      const netMsg = `[groq] ${model} -> network error/timeout: ${err?.message || err}`;
+      errors.push(netMsg);
+      console.error(netMsg);
+    }
+  }
+
+  return { error: errors.join("\n") || "Unknown Groq error" };
+}
 
 export const askAstrologer = createServerFn({ method: "POST" })
   .validator(AiChatInput)
   .handler(async ({ data }) => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("GEMINI_API_KEY is not set");
-      return { reply: "The astrologer is unavailable right now. Please try again shortly." };
-    }
+  const focus = specialistFocus[data.specialist] || data.specialist;
+  const isHi = data.lang === "hi";
 
-    const focus = specialistFocus[data.specialist];
-    const chart = data.chart
-      ? `The visitor's already-generated birth chart: ${data.chart}. Use these exact placements whenever they are relevant.`
-      : "No birth chart has been generated yet. If the question genuinely needs one, ask for date, exact time and place of birth in one short sentence before interpreting.";
+  const chartDescription = data.chart
+    ? `The seeker's Janma Kundli details: ${data.chart}. Integrate these exact placements (Lagna, Rashi, Nakshatra, active Dasha) specifically into your analysis.`
+    : "No birth chart has been linked yet. Give readings grounded in universal Vedic astrology principles (Bhavas, Grahas, transits) and advise the seeker to generate their free Kundli on Vastugrah for pinpoint accuracy.";
 
-    const transcript = data.messages
-      .map((m) => `${m.role === "user" ? "Visitor" : "Astrologer"}: ${m.content}`)
-      .join("\n");
+  const defaultLang = isHi ? "Hindi in Devanagari script" : "English";
+  const languageInstruction = `Reply in the same language and script as the seeker's LATEST message:
+   - If they write Hinglish (Hindi words typed in English/Roman letters, e.g. "mujhe kya nhi krna chahiye"), reply in natural, friendly Hinglish in Roman letters. Do not switch to Devanagari. Keep astrological terms familiar (Lagna, Rashi, Dasha, Upaya, Shukra, Shani).
+   - If they write in Devanagari Hindi, reply in fluent, respectful Hindi in Devanagari.
+   - If they write in English, reply in warm, articulate English.
+   - If the message is a greeting or unclear, use ${defaultLang}.
+   Keep the same respectful, spiritual tone in every language.`;
 
-    const visitor = data.name
-      ? `The visitor's name is ${data.name}. Greet them by name once, then continue.`
-      : "";
-    const language =
-      data.lang === "hi"
-        ? "Answer entirely in Hindi using Devanagari script, keeping Sanskrit terms (dasha, rashi, lagna, nakshatra) as they are."
-        : "Write in plain English (you may use common Hindi terms like dasha, rashi, lagna).";
+  const system = `You are a revered, senior Vedic Astrologer (Acharya) at Vastugrah in Faridabad, Haryana, specializing in ${focus}.
 
-    const prompt = `You are a senior Vedic astrologer at Vastugrah, Faridabad, specialising only in ${focus}.
+${chartDescription}
+${data.name ? `Seeker's name: ${data.name}. Greet them respectfully only in your first reply of the conversation, not in every reply.` : ""}
 
-${chart}
-${visitor}
+Consultation guidelines:
+1. Answer the seeker's latest question directly. For substantive questions give a thoughtful reply of roughly 150 to 250 words in 2 to 3 short paragraphs. For greetings or very short messages (like "hi"), reply briefly and warmly and invite them to ask their question.
+2. Use authentic Jyotish fundamentals: relevant Bhavas (houses), governing Grahas and transits.
+3. If chart placements are provided, weave them into the reading.
+4. Give realistic astrological timing where relevant.
+5. When giving advice, include 1 to 2 traditional, practical Upayas (auspicious days, colors, directions, a mantra, or Daan).
+6. Be encouraging and spiritually uplifting. Never predict death, fatal accidents, or give medical diagnoses. For health topics, remind them to consult a doctor.
+7. ${languageInstruction}
+8. Use plain text with clear paragraph breaks. Do not use markdown headings or tables.
+9. Do not repeat earlier answers; continue the conversation naturally using the previous messages.
+10. For any real question or reading (NOT for simple greetings or small talk), end your reply with one short, warm closing line inviting the seeker to consult our human astrologer at Vastugrah for a deeper, personal reading, and tell them to tap the WhatsApp chat button shown below your message. Write this line in the same language as your reply. Do not mention the button for greetings.`;
 
-Rules:
-- Answer the visitor's latest message precisely in 2 to 4 sentences. No filler, no disclaimers, no lists of questions.
-- Base every statement on classical Jyotish (grahas, bhavas, rashis, nakshatras, dashas, transits). Name the planet or house you are using.
-- If the chart is missing a needed detail, ask for exactly that one detail.
-- Never predict death, or diagnose illness; for health, speak about constitution, routine and care.
-- Write warmly but factually. ${language}
-- Only if the conversation is already 2 or more exchanges deep, close with one short sentence offering a detailed reading by a human astrologer.
+  const recent = data.messages.slice(-10);
 
-Conversation so far:
-${transcript}
+  const allErrors = [];
 
-Reply as the astrologer, plain text only.`;
+  // 1) Gemini (best Hindi quality)
+  const gemini = await callGemini({ system, messages: recent, apiKey: getEnv("GEMINI_API_KEY") });
+  if (gemini.text) return { reply: gemini.text };
+  allErrors.push(gemini.error);
 
-    try {
-      const response = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey, // header, so the key never appears in URLs or logs
-          },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 300, temperature: 0.7 },
-          }),
-        }
-      );
+  // 2) Groq backup when Gemini is overloaded or failing
+  const groq = await callGroq({ system, messages: recent, apiKey: getEnv("GROQ_API_KEY") });
+  if (groq.text) return { reply: groq.text };
+  allErrors.push(groq.error);
 
-      if (!response.ok) {
-        const err = await response.text();
-        console.error("Gemini error:", response.status, err);
-        return { reply: FALLBACK_REPLY };
-      }
+  const result = { error: allErrors.join("\n") };
 
-      const result = await response.json();
-      const text = result?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
-      return { reply: text || FALLBACK_REPLY };
-    } catch (err) {
-      console.error("Gemini request failed:", err);
-      return { reply: FALLBACK_REPLY };
-    }
-  });
+  // Honest fallback (no canned readings). Real reason is in the server logs.
+  // In local development the reason is also shown in the chat bubble.
+  const friendly = isHi
+    ? "क्षमा करें, ज्योतिषी इस समय उत्तर नहीं दे पा रहे हैं। कृपया कुछ क्षण बाद पुनः प्रयास करें।"
+    : "Sorry, the astrologer couldn't answer just now. Please try again in a moment.";
+  return {
+    reply: import.meta.env?.DEV ? `${friendly}\n\n[dev debug] ${result.error}` : friendly,
+  };
+});
 
 /* ------------------------------------------------------------------ */
 /* FreeAstrologyAPI proxy                                              */
 /* ------------------------------------------------------------------ */
 
-const AstroApiInput = z.object({
-  // Letters, digits, "/", "_" and "-" only, so callers can't use ".." or "?" tricks.
-  endpoint: z
-    .string()
-    .min(1)
-    .max(100)
-    .regex(/^\/?[a-zA-Z0-9/_-]+$/, "Invalid endpoint")
-    .refine((v) => !v.includes(".."), "Invalid endpoint"),
-  payload: z.record(z.any()).optional(),
-});
-
 export const callAstroApi = createServerFn({ method: "POST" })
-  .validator(AstroApiInput)
+  .validator(
+    z.object({
+      endpoint: z.string().min(1),
+      payload: z.record(z.any()).optional(),
+    })
+  )
   .handler(async ({ data }) => {
-    const apiKey = process.env.FREE_ASTRO_API_KEY;
-    if (!apiKey) {
-      console.error("FREE_ASTRO_API_KEY is not set");
-      return { error: "Astro API is not configured" };
+  const apiKey = getEnv("FREE_ASTRO_API_KEY");
+  if (!apiKey) return { error: "FREE_ASTRO_API_KEY is not set on the server" };
+
+  const endpoint = data.endpoint.startsWith("/") ? data.endpoint.slice(1) : data.endpoint;
+  try {
+    const res = await fetch(`https://json.freeastrologyapi.com/v1/${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify(data.payload || {}),
+    });
+
+    if (!res.ok) {
+      return { error: `FreeAstrologyAPI error: ${res.status}` };
     }
 
-    const endpoint = data.endpoint.startsWith("/") ? data.endpoint.slice(1) : data.endpoint;
-
-    try {
-      const res = await fetch(`https://json.freeastrologyapi.com/v1/${endpoint}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-        },
-        body: JSON.stringify(data.payload || {}),
-      });
-      return await res.json();
-    } catch (err) {
-      console.error("Free Astro API error:", err);
-      return { error: "Astro API request failed" };
-    }
-  });
+    return await res.json();
+  } catch (err) {
+    console.error("Free Astro API error:", err);
+    return { error: err.message };
+  }
+});

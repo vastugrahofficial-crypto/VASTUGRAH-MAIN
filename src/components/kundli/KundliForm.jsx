@@ -2,14 +2,13 @@ import React, { useState } from "react";
 import { Sparkles } from "lucide-react";
 import PlaceCombobox from "@/components/kundli/PlaceCombobox";
 import { CITIES, TZ_OPTIONS, formatTz } from "@/lib/kundli/cities";
-import { computeKundli } from "@/lib/kundli/kundli";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLang } from "@/lib/i18n";
 
 const FIELD = "mt-2 h-12 w-full rounded-full border border-border bg-background px-4 text-base outline-none transition focus:border-primary";
 const LABEL = "text-[0.68rem] uppercase tracking-[0.16em] text-muted-foreground";
 
-export default function KundliForm({ onSubmit }) {
+export default function KundliForm({ onSubmit, busy = false }) {
   const { t } = useLang();
   const [name, setName] = useState("");
   const [date, setDate] = useState("");
@@ -24,6 +23,7 @@ export default function KundliForm({ onSubmit }) {
 
   const handleSubmit = (event) => {
     event.preventDefault();
+    if (busy) return;
     if (!date || !time) { setError(t("kform.errDates")); return; }
     const city = CITIES[Number(cityIndex)];
     const payload = {
@@ -44,7 +44,8 @@ export default function KundliForm({ onSubmit }) {
       return;
     }
     setError("");
-    onSubmit(computeKundli(payload));
+    // The page calculates the kundli (via the astrology API, with an in-app fallback)
+    onSubmit(payload);
   };
 
   return (
@@ -98,7 +99,8 @@ export default function KundliForm({ onSubmit }) {
 
       <button
         type="submit"
-        className="btn-caps mt-6 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full bg-primary px-6 text-primary-foreground transition hover:opacity-90 sm:w-auto"
+        disabled={busy}
+        className="btn-caps mt-6 inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-full bg-primary px-6 text-primary-foreground transition hover:opacity-90 disabled:opacity-60 sm:w-auto"
       >
         <Sparkles size={16} /> {t("kform.submit")}
       </button>

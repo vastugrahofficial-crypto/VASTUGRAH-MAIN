@@ -8,7 +8,7 @@ import ConsultCard from "@/components/ai/ConsultCard";
 import Avatar from "@/components/ai/Avatar";
 import { askAstrologer } from "@/lib/server-fns";
 import { readChart } from "@/lib/kundli/storage";
-import { SPECIALISTS, specialistById, specialistFocus, specialistName } from "@/lib/aiAstrologers";
+import { specialistById, specialistFocus, specialistName } from "@/lib/aiAstrologers";
 import { useAuth } from "@/lib/AuthContext";
 import { useLang } from "@/lib/i18n";
 
@@ -52,14 +52,26 @@ export default function AiAstrologerWindow({ initialId }) {
         data: {
           specialist: activeId,
           chart: chartText(chart),
-          name: user ? firstName || undefined : undefined,
+          name: firstName || undefined,
           lang,
           messages: next.slice(-8),
         },
       });
       setThreads((th) => ({ ...th, [activeId]: [...next, { role: "assistant", content: res.reply }] }));
     } catch {
-      setThreads((th) => ({ ...th, [activeId]: [...next, { role: "assistant", content: t("ai.greetNoChart", { name: "", focus }) }] }));
+      setThreads((th) => ({
+        ...th,
+        [activeId]: [
+          ...next,
+          {
+            role: "assistant",
+            content:
+              lang === "hi"
+                ? "ग्रहों के गोचर का अध्ययन करते समय क्षणिक विलंब हुआ। कृपया अपना प्रश्न पुनः पूछें, अथवा जन्म कुंडली विवरण साझा करें ताकि विस्तृत विश्लेषण किया जा सके।"
+                : "I encountered a brief pause while reviewing the planetary alignments. Please ask your question once more, or share your birth details for an exact reading.",
+          },
+        ],
+      }));
     } finally {
       setBusy(false);
     }
