@@ -1,9 +1,9 @@
 export const ASTROLOGERS = [
   {
-    name: "Acharya Rajesh Shastri",
+    name: "Arun Kumar Gaur",
     title: "Vastu & Jyotish Acharya",
     titleHi: "वास्तु एवं ज्योतिष आचार्य",
-    experience: "22 years",
+    experience: "11 years",
     languages: "Hindi, English",
     rating: "4.9",
     consults: "7,200+",
