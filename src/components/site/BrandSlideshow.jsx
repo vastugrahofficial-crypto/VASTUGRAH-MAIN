@@ -2,19 +2,48 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { Image } from "@/components/ui/image";
-import BrandLogo from "@/components/site/BrandLogo";
-import { FEATURED } from "@/lib/site";
 
+// Put the image files in  public/images/  and list them here.
+//  - src:   path starting with /images/
+//  - focus: which part of the picture stays visible when it is cropped to the portrait card
+//           ("50% 50%" = centre, "20% 50%" = favour the left side, "50% 20%" = favour the top)
+//  - to:    page that opens when the card is clicked
 const SLIDES = [
-  { logo: true, to: "/", alt: "Vastugrah emblem with compass, rashis and diya", title: "Vastugrah", caption: "Jyotish & Vastu, rooted in tradition" },
-  ...FEATURED.map((f, i) => ({
-    src: f.img,
-    to: i === 0 ? "/services" : i === 1 ? "/services" : "/kundli",
-    alt: f.title,
-    title: f.title,
-    caption: f.desc,
-  })),
+  {
+    src: "/images/astrology.jpg",
+    focus: "25% 50%",
+    to: "/kundli",
+    title: "Astrology",
+    caption: "Kundli reading with real clarity.",
+  },
+  {
+    src: "/images/astrologer.jpg",
+    focus: "50% 35%",
+    to: "/about",
+    title: "Our Astrologer",
+    caption: "Guidance rooted in classical Jyotish.",
+  },
+  {
+    src: "/images/vastu-audit.jpg",
+    focus: "45% 50%",
+    to: "/services",
+    title: "Vastu Audit",
+    caption: "Compass-accurate analysis of your space.",
+  },
+  {
+    src: "/images/gemology.jpg",
+    focus: "50% 50%",
+    to: "/services",
+    title: "Gemology",
+    caption: "Stones chosen by your planetary needs.",
+  },
+  {
+    src: "/images/vastu-purusha.jpg",
+    focus: "50% 45%",
+    to: "/services",
+    title: "Vastu Purusha",
+    caption: "The sacred grid behind every Vastu plan.",
+  },
 ];
 
 export default function BrandSlideshow() {
@@ -48,7 +77,7 @@ export default function BrandSlideshow() {
           return (
             <motion.button
               type="button"
-              key={slide.alt}
+              key={slide.src}
               style={{ zIndex: total - pos }}
               initial={false}
               animate={reduce ? { opacity: pos === 0 ? 1 : 0, x: 0, y: 0, rotate: 0, scale: 1 } : target}
@@ -59,13 +88,15 @@ export default function BrandSlideshow() {
               onClick={() => (pos === 0 ? navigate({ to: slide.to }) : setActive(i))}
               className="absolute inset-0 overflow-hidden rounded-[2rem] border border-primary/40 bg-card text-left shadow-[0_28px_60px_-32px_hsl(var(--primary)/0.8)]"
             >
-              {slide.logo ? (
-                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-secondary/70 via-card to-secondary/40">
-                  <BrandLogo className="h-[78%] w-[78%]" px={480} ring={false} />
-                </div>
-              ) : (
-                <Image src={slide.src} alt={slide.alt} className="h-full w-full" />
-              )}
+              {/* object-cover keeps the picture's proportions (no squeezing or stretching) and crops the overflow */}
+              <img
+                src={slide.src}
+                alt={slide.title}
+                loading={i === 0 ? "eager" : "lazy"}
+                draggable={false}
+                className="block h-full w-full select-none object-cover"
+                style={{ objectPosition: slide.focus }}
+              />
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent p-3.5 sm:p-4 lg:p-5">
                 <span className="block font-heading text-base leading-tight text-white sm:text-xl lg:text-2xl">{slide.title}</span>
                 <span className="hidden text-xs text-white/80 sm:block sm:text-sm">{slide.caption}</span>
@@ -87,7 +118,7 @@ export default function BrandSlideshow() {
         <div className="flex gap-2">
           {SLIDES.map((slide, i) => (
             <button
-              key={slide.alt}
+              key={slide.src}
               type="button"
               onClick={() => setActive(i)}
               aria-label={`Show ${slide.title}`}

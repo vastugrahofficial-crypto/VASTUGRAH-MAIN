@@ -326,7 +326,7 @@ Consultation guidelines:
 });
 
 /* ------------------------------------------------------------------ */
-/* FreeAstrologyAPI proxy                                              */
+/* FreeAstroAPI (freeastroapi.com) proxy                               */
 /* ------------------------------------------------------------------ */
 
 export const callAstroApi = createServerFn({ method: "POST" })
@@ -341,8 +341,12 @@ export const callAstroApi = createServerFn({ method: "POST" })
   if (!apiKey) return { error: "FREE_ASTRO_API_KEY is not set on the server" };
 
   const endpoint = data.endpoint.startsWith("/") ? data.endpoint.slice(1) : data.endpoint;
+  if (import.meta.env?.DEV) {
+    // Helps confirm which key was loaded without printing the whole secret
+    console.log(`[AstroAPI] using key ${apiKey.slice(0, 4)}... (${apiKey.length} characters) for ${endpoint}`);
+  }
   try {
-    const res = await fetch(`https://json.freeastrologyapi.com/${endpoint}`, {
+    const res = await fetch(`https://api.freeastroapi.com/${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -356,7 +360,7 @@ export const callAstroApi = createServerFn({ method: "POST" })
     if (!res.ok) {
       const body = (await res.text().catch(() => "")).slice(0, 200);
       console.error(`[AstroAPI] ${endpoint} -> HTTP ${res.status}: ${body}`);
-      return { error: `FreeAstrologyAPI error: ${res.status} ${body}`.trim() };
+      return { error: `FreeAstroAPI error: ${res.status} ${body}`.trim() };
     }
 
     return await res.json();

@@ -8,6 +8,7 @@ const exp = (a, lang) => (lang === "hi" ? a.experience.replace("years", "वर�
 /**
  * The selected astrologer: the portrait fills the whole panel, with the
  * credentials laid over its lower edge and one consult action.
+ * If the astrologer has a `photo`, it is shown; otherwise the coloured initials are used.
  */
 export default function AstrologerCard({ a, lang, consult }) {
   const expertise = lang === "hi" ? a.expertiseHi : a.expertise;
@@ -15,25 +16,40 @@ export default function AstrologerCard({ a, lang, consult }) {
   return (
     <motion.div
       key={a.name}
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
       className="relative z-10 mx-auto w-full max-w-[21rem] overflow-hidden rounded-2xl border border-primary/50 shadow-[0_24px_50px_-30px_hsl(var(--primary))]"
     >
       <div
-        className="relative h-[15.5rem] w-full sm:h-[19rem]"
+        className="relative h-[21rem] w-full sm:h-[24rem]"
         style={{ background: `linear-gradient(150deg, ${a.accent}, ${a.accent}dd 45%, ${a.accent}99)` }}
       >
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 opacity-25"
-          style={{ backgroundImage: "radial-gradient(circle at 50% 32%, #fff 0, transparent 55%)" }}
-        />
-        <span className="absolute inset-x-0 top-[26%] text-center font-heading text-[5.5rem] leading-none text-white/90 sm:text-[6.5rem]">
-          {a.initials}
-        </span>
+        {a.photo ? (
+          // object-cover keeps the photo's proportions (no stretching); photoFocus picks the visible part
+          <img
+            src={a.photo}
+            alt={a.name}
+            draggable={false}
+            className="absolute inset-0 h-full w-full select-none object-cover"
+            style={{ objectPosition: a.photoFocus || "50% 20%" }}
+          />
+        ) : (
+          <>
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 opacity-25"
+              style={{ backgroundImage: "radial-gradient(circle at 50% 32%, #fff 0, transparent 55%)" }}
+            />
+            <span className="absolute inset-x-0 top-[26%] text-center font-heading text-[5.5rem] leading-none text-white/90 sm:text-[6.5rem]">
+              {a.initials}
+            </span>
+          </>
+        )}
 
-        <div className="absolute inset-x-0 bottom-0 h-[78%] bg-gradient-to-t from-black/90 via-black/60 to-transparent" />
+        <div
+          className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent ${a.photo ? "h-[58%]" : "h-[78%]"}`}
+        />
 
         <div className="absolute inset-x-0 bottom-0 px-3.5 pb-3.5 text-center text-white">
           <p className="font-heading text-xl leading-tight sm:text-2xl">{a.name}</p>

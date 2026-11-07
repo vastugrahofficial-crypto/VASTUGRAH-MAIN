@@ -13,6 +13,8 @@ export const ASTROLOGERS = [
     expertiseHi: ["वास्तु", "कुंडली", "उपाय"],
     accent: "#B98A2E",
     initials: "RS",
+    photo: "/images/astrologer.jpg",
+    photoFocus: "50% 15%",
   },
   {
     name: "Dr. Meera Joshi",

@@ -9,12 +9,17 @@ const RISE = 22;
  * Compact arc of portraits: one horizontal row you swipe freely. Each circle
  * sits on a cosine arc, so the one nearest the middle rises and grows while the
  * neighbours drop away — and that middle one feeds the panel above.
+ * Tiles show the astrologer's photo when they have one, otherwise their initials.
  */
 export default function AstrologerArc({ active, onChange, onInteract }) {
   const scroller = useRef(null);
   const fromScroll = useRef(false);
+  const programmatic = useRef(false); // true while the row is being moved by code (auto-swipe or a tap)
+  const programmaticTimer = useRef(null);
   const reduce = useReducedMotion();
   const total = ASTROLOGERS.length;
+
+  useEffect(() => () => clearTimeout(programmaticTimer.current), []);
 
   const centerOn = (index) => {
     const el = scroller.current;
@@ -22,8 +27,22 @@ export default function AstrologerArc({ active, onChange, onInteract }) {
     const item = el.children[index];
     if (!item) return;
     const target = item.offsetLeft - (el.clientWidth - item.clientWidth) / 2;
-    if (Math.abs(el.scrollLeft - target) < 10) return;
-    el.scrollTo({ left: target, behavior: reduce ? "auto" : "smooth" });
+    const distance = Math.abs(el.scrollLeft - target);
+    if (distance < 10) return;
+
+    // Long jumps (for example from the last astrologer back to the first) happen instantly
+    // instead of sweeping past everyone in between.
+    const far = distance > item.clientWidth * 2.5;
+    const instant = reduce || far;
+
+    // Ignore the scroll events caused by this movement so they cannot change the selection back
+    programmatic.current = true;
+    clearTimeout(programmaticTimer.current);
+    programmaticTimer.current = setTimeout(() => {
+      programmatic.current = false;
+    }, instant ? 150 : 700);
+
+    el.scrollTo({ left: target, behavior: instant ? "auto" : "smooth" });
   };
 
   useEffect(() => {
@@ -38,6 +57,7 @@ export default function AstrologerArc({ active, onChange, onInteract }) {
   }, [active, reduce]);
 
   const handleScroll = () => {
+    if (programmatic.current) return;
     const el = scroller.current;
     if (!el) return;
     const middle = el.scrollLeft + el.clientWidth / 2;
@@ -57,12 +77,17 @@ export default function AstrologerArc({ active, onChange, onInteract }) {
     }
   };
 
+  const userTookOver = () => {
+    programmatic.current = false; // the visitor is now in control of scrolling
+    onInteract?.();
+  };
+
   return (
     <div
       ref={scroller}
       onScroll={handleScroll}
-      onPointerDown={() => onInteract?.()}
-      onWheel={() => onInteract?.()}
+      onPointerDown={userTookOver}
+      onWheel={userTookOver}
       style={{ paddingLeft: `calc(50% - ${SIZE / 2}px)`, paddingRight: `calc(50% - ${SIZE / 2}px)` }}
       className="no-bar relative flex snap-x snap-mandatory items-end gap-2.5 overflow-x-auto pb-0.5 pt-6 sm:gap-4"
     >
@@ -88,7 +113,7 @@ export default function AstrologerArc({ active, onChange, onInteract }) {
               className="flex flex-col items-center"
             >
               <div
-                className="flex items-center justify-center rounded-xl font-heading text-white"
+                className="flex items-center justify-center overflow-hidden rounded-xl font-heading text-white"
                 style={{
                   width: SIZE,
                   height: SIZE,
@@ -98,7 +123,17 @@ export default function AstrologerArc({ active, onChange, onInteract }) {
                   boxShadow: isActive ? "0 0 0 4px hsl(var(--primary) / 0.14), 0 16px 28px -20px hsl(var(--primary))" : "none",
                 }}
               >
-                {a.initials}
+                {a.photo ? (
+                  <img
+                    src={a.photo}
+                    alt=""
+                    draggable={false}
+                    className="h-full w-full select-none object-cover"
+                    style={{ objectPosition: a.tileFocus || "50% 30%" }}
+                  />
+                ) : (
+                  a.initials
+                )}
               </div>
               <span
                 className={`mt-1.5 w-full truncate text-center text-[0.55rem] leading-tight ${isActive ? "text-primary" : "text-muted-foreground"}`}

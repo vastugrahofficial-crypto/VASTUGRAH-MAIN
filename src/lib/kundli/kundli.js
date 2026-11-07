@@ -28,6 +28,10 @@ const fmtDate = (d) => `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()
  *   retro:    { Sun: false, ... }
  *   ayanDeg:  ayanamsa in degrees (display only)
  *   dasha:    optional [{ lord, start: Date, end: Date }] (from the API); computed locally if missing
+ *   dashaCurrent: optional current mahadasha lord (from the API)
+ *   d9, d10:  optional { planets: { Sun: signIndex0, ... }, asc: signIndex0 } from the API
+ *   panchang: optional partial panchang overrides from the API
+ *   manglik:  optional boolean from the API
  *   source:   "api" | "local"
  * }
  */
@@ -62,8 +66,8 @@ export function assembleKundli(input, raw) {
       retro,
       house: ((sign - ascSign + 12) % 12) + 1,
       bhava: Math.floor(norm360(longitude - ascLon) / 30) + 1,
-      navamsa: navamsaSign(longitude),
-      dashamsa: dashamsaSign(longitude),
+      navamsa: raw.d9?.planets?.[name] ?? navamsaSign(longitude),
+      dashamsa: raw.d10?.planets?.[name] ?? dashamsaSign(longitude),
     };
   });
 
@@ -78,8 +82,8 @@ export function assembleKundli(input, raw) {
   const charts = [
     { key: "d1", title: "Lagna Kundli", subtitle: "D-1 · Birth chart", houses: signHouses(ascSign, "sign") },
     { key: "moon", title: "Chandra Kundli", subtitle: "Moon chart", houses: signHouses(moon.sign, "sign") },
-    { key: "d9", title: "Navamsa", subtitle: "D-9 · Marriage & dharma", houses: signHouses(navamsaSign(ascLon), "navamsa") },
-    { key: "d10", title: "Dashamsa", subtitle: "D-10 · Career", houses: signHouses(dashamsaSign(ascLon), "dashamsa") },
+    { key: "d9", title: "Navamsa", subtitle: "D-9 · Marriage & dharma", houses: signHouses(raw.d9?.asc ?? navamsaSign(ascLon), "navamsa") },
+    { key: "d10", title: "Dashamsa", subtitle: "D-10 · Career", houses: signHouses(raw.d10?.asc ?? dashamsaSign(ascLon), "dashamsa") },
     {
       key: "chalit",
       title: "Bhava Chalit",
@@ -91,7 +95,7 @@ export function assembleKundli(input, raw) {
   const moonNak = nakshatraOf(moon.longitude);
   const diff = norm360(moon.longitude - planets[0].longitude);
   const tithiIndex = Math.floor(diff / 12);
-  const panchang = {
+  const localPanchang = {
     tithi: `${tithiIndex < 15 ? "Shukla" : "Krishna"} ${TITHIS[tithiIndex]}`,
     yoga: YOGAS[Math.floor(norm360(moon.longitude + planets[0].longitude) / (360 / 27))],
     karana: karanaName(Math.floor(diff / 6)),
@@ -99,6 +103,7 @@ export function assembleKundli(input, raw) {
     nakshatra: `${moonNak.name} (Pada ${moonNak.pada})`,
     nakshatraLord: moonNak.lord,
   };
+  const panchang = { ...localPanchang, ...(raw.panchang || {}) };
 
   // Vimshottari dasha: from the API when provided, otherwise computed from the Moon's nakshatra
   const periods = [];
@@ -120,13 +125,13 @@ export function assembleKundli(input, raw) {
     }
   }
   const now = new Date();
-  const current = [...periods].reverse().find((p) => p.start <= now)?.lord ?? periods[0].lord;
+  const current = raw.dashaCurrent || ([...periods].reverse().find((p) => p.start <= now)?.lord ?? periods[0].lord);
 
   const mars = planets.find((p) => p.name === "Mars");
   const manglikHouses = [1, 2, 4, 7, 8, 12];
   const fromMoon = ((mars.sign - moon.sign + 12) % 12) + 1;
   const dosha = {
-    manglik: manglikHouses.includes(mars.house) || manglikHouses.includes(fromMoon),
+    manglik: typeof raw.manglik === "boolean" ? raw.manglik : manglikHouses.includes(mars.house) || manglikHouses.includes(fromMoon),
     fromLagna: mars.house,
     fromMoon,
   };
